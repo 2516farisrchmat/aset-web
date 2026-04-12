@@ -1,1 +1,79 @@
 upd_cip-cLfoserD8TXBCqttZG3da5wUtXmoGkSU5CynL-0
+
+File start.js belum ada di VM. Ini file penting yang dibutuhkan container frontend. Jalankan perintah ini di VM:
+
+# Download start.js dari server pusat
+curl -s https://asmartcbt.id/api/health > /dev/null && \
+cat > ~/cbt-system/frontend/start.js << 'STARTJS'
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '0.0.0.0';
+const BUILD_DIR = path.join(__dirname, 'build');
+const INDEX_FILE = path.join(BUILD_DIR, 'index.html');
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
+  '.css': 'text/css', '.json': 'application/json',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+  '.webp': 'image/webp', '.map': 'application/json', '.txt': 'text/plain',
+  '.webmanifest': 'application/manifest+json',
+};
+
+function serveFile(res, filePath) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      if (fs.existsSync(INDEX_FILE)) {
+        fs.readFile(INDEX_FILE, (e2, d) => {
+          res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache, no-store, must-revalidate'});
+          res.end(e2 ? '<html><body><p>Loading...</p></body></html>' : d);
+        });
+      } else {
+        res.writeHead(200, {'Content-Type':'text/html'});
+        res.end('<html><body><p>Building application, please wait...</p></body></html>');
+      }
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const headers = {'Content-Type': MIME[ext] || 'application/octet-stream'};
+    if (filePath.includes('/static/')) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    res.writeHead(200, headers);
+    res.end(data);
+  });
+}
+
+const server = http.createServer((req, res) => {
+  const urlPath = req.url.split('?')[0];
+  if (urlPath === '/health') { res.writeHead(200); res.end('{"status":"ok"}'); return; }
+  if (urlPath === '/' || urlPath === '') { serveFile(res, INDEX_FILE); return; }
+  const filePath = path.join(BUILD_DIR, urlPath);
+  if (!filePath.startsWith(BUILD_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  serveFile(res, filePath);
+});
+
+server.listen(PORT, HOST, () => {
+  console.log('[FRONTEND] Server on ' + HOST + ':' + PORT);
+  if (!fs.existsSync(INDEX_FILE)) {
+    console.log('[FRONTEND] No build, starting build...');
+    const build = spawn('npx', ['craco', 'build'], {
+      cwd: __dirname, stdio: 'inherit',
+      env: Object.assign({}, process.env, {NODE_OPTIONS: '--max-old-space-size=1536'})
+    });
+    build.on('exit', (c) => console.log(c === 0 ? '[FRONTEND] Build done!' : '[FRONTEND] Build failed'));
+  } else {
+    console.log('[FRONTEND] Serving from ' + BUILD_DIR);
+  }
+});
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') setTimeout(() => { server.close(); server.listen(PORT, HOST); }, 3000);
+  else { console.error(err.message); process.exit(1); }
+});
+STARTJS
+
+echo "start.js created!"
+ls -la ~/cbt-system/frontend/start.js
